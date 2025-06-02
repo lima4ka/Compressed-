@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Compressed Chat & Visualizer</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #ffff8e;
+      padding: 20px;
+      color: #a17251;
+    }
+    #chat-box {
+      background: #f6efe4;
+      padding: 10px;
+      border: 1px solid #a17251;
+      height: 300px;
+      overflow-y: scroll;
+      margin-bottom: 10px;
+      color: #331704;
+    }
+    #message {
+      width: 60%;
+      padding: 10px;
+      background: #f6efe4;
+      border: 1px solid #a17251;
+      color: #a17251;
+    }
+    #send, #compressor {
+      padding: 10px 20px;
+      margin-left: 5px;
+      background: #a17251;
+      color: #f6efe4;
+      border: none;
+      cursor: pointer;
+    }
+    #send:hover, #compressor:hover {
+      opacity: 0.8;
+    }
+    #stats, #steps {
+      font-size: 0.9em;
+      color: #5c2c0b;;
+      margin-top: 10px;
+      white-space: pre-wrap;
+      background: #f6efe4;
+      padding: 10px;
+      border: 1px solid #5c2c0b;;
+    }
+    select {
+      padding: 8px;
+      margin-bottom: 10px;
+      background: #f6efe4;
+      border: 1px solid #a17251;
+      color: #a17251;
+    }
+    .message {
+      margin-bottom: 10px;
+    }
+    .compressed {
+      color: #5c2c0b;
+      font-size: 0.85em;
+      margin-top: 2px;
+    }
+    .compression-info {
+      color: #5c2c0b;
+      font-size: 0.85em;
+    }
+  </style>
+</head>
+<body>
+  <h2>Web Chat with Message Compression + Visualizer</h2>
+  <label for="algorithm">Choose Compression Algorithm:</label>
+  <select id="algorithm">
+    <option value="rle">Run-Length Encoding (RLE)</option>
+    <option value="lzw">Lempel-Ziv-Welch (LZW)</option>
+  </select>
+
+  <div id="chat-box"></div>
+  <input type="text" id="message" placeholder="Type your message here..." />
+  <button id="send">Send</button>
+
+  <div id="stats"></div>
+  <div id="steps"></div>
+
+  <script>
+    const chatBox = document.getElementById('chat-box');
+    const messageInput = document.getElementById('message');
+    const sendButton = document.getElementById('send');
+    const stats = document.getElementById('stats');
+    const steps = document.getElementById('steps');
+    const algorithmSelect = document.getElementById('algorithm');
+
+    function compressRLE(text) {
+      let result = '', stepLog = 'RLE Steps:\n';
+      for (let i = 0; i < text.length; i++) {
+        let count = 1;
+        while (i + 1 < text.length && text[i] === text[i + 1]) {
+          count++;
+          i++;
+        }
+        result += text[i] + (count > 1 ? count : '');
+        stepLog += `Character '${text[i]}' repeated ${count} times → '${text[i]}${count > 1 ? count : ''}'\n`;
+      }
+      return { result, stepLog };
+    }
+
+    function decompressRLE(text) {
+      let result = '';
+      for (let i = 0; i < text.length; i++) {
+        let char = text[i];
+        let count = '';
+        while (i + 1 < text.length && !isNaN(text[i + 1])) {
+          count += text[++i];
+        }
+        result += char.repeat(count ? parseInt(count) : 1);
+      }
+      return result;
+    }
+
+    function compressLZW(text) {
+      let dict = {}, data = (text + '').split('');
+      let out = [], phrase = data[0], code = 256, stepLog = 'LZW Steps:\n';
+      for (let i=1; i<data.length; i++) {
+        let currChar = data[i];
+        if (dict[phrase + currChar] != null) {
+          phrase += currChar;
+        } else {
+          out.push(phrase.length > 1 ? dict[phrase] : phrase.charCodeAt(0));
+          stepLog += `Output: '${phrase}' code → ${phrase.length > 1 ? dict[phrase] : phrase.charCodeAt(0)}\n`;
+          dict[phrase + currChar] = code++;
+          phrase = currChar;
+        }
+      }
+      out.push(phrase.length > 1 ? dict[phrase] : phrase.charCodeAt(0));
+      stepLog += `Output: '${phrase}' code → ${phrase.length > 1 ? dict[phrase] : phrase.charCodeAt(0)}\n`;
+      return { result: out.join(','), stepLog };
+    }
+
+    function decompressLZW(input) {
+      let dict = {}, data = input.split(',').map(Number);
+      let currChar = String.fromCharCode(data[0]), oldPhrase = currChar;
+      let out = [currChar], code = 256, phrase;
+      for (let i=1; i<data.length; i++) {
+        let currCode = data[i];
+        if (currCode < 256) {
+          phrase = String.fromCharCode(currCode);
+        } else {
+          phrase = dict[currCode] ? dict[currCode] : (oldPhrase + currChar);
+        }
+        out.push(phrase);
+        currChar = phrase.charAt(0);
+        dict[code++] = oldPhrase + currChar;
+        oldPhrase = phrase;
+      }
+      return out.join('');
+    }
+
+    function appendMessage(user, original, compressed) {
+      const div = document.createElement('div');
+      div.className = 'message';
+      div.innerHTML = `<strong>[${user}]</strong>: ${original}<div class="compressed">Compressed: ${compressed}</div><div class="compression-info">(${compressed.length} vs ${original.length} chars)</div>`;
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    sendButton.addEventListener('click', () => {
+      const originalText = messageInput.value;
+      if (!originalText.trim()) return;
+
+      const algorithm = algorithmSelect.value;
+      let compressedData, decompressedText, log;
+
+      if (algorithm === 'rle') {
+        const { result, stepLog } = compressRLE(originalText);
+        compressedData = result;
+        decompressedText = decompressRLE(compressedData);
+        log = stepLog;
+      } else if (algorithm === 'lzw') {
+        const { result, stepLog } = compressLZW(originalText);
+        compressedData = result;
+        decompressedText = decompressLZW(compressedData);
+        log = stepLog;
+      }
+
+      appendMessage('You', decompressedText, compressedData);
+      messageInput.value = '';
+      stats.innerText = `Compressed from ${originalText.length} to ${compressedData.length} characters using ${algorithm.toUpperCase()}.`;
+      steps.innerText = log;
+    });
+  </script>
+</body>
+</html>
